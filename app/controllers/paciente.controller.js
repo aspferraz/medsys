@@ -50,8 +50,14 @@ exports.count = (req, res) => {
 };
 
 exports.getCondition = function (context, attrPrefix="", attrSuffix="") {
-
-    if (context.dados_pessoais_id) {
+    if (context.id) {
+        return {
+            [`${attrPrefix}id${attrSuffix}`]: {
+                [Op.eq]: context.id
+            }
+        }
+    }
+    else if (context.dados_pessoais_id) {
         return {
             [`${attrPrefix}dados_pessoais_id${attrSuffix}`]: {
                 [Op.eq]: context.dados_pessoais_id
@@ -85,6 +91,7 @@ exports.findAll = async (req, res) => {
     const sortDesc = req.query.sortdesc;
 
     let condition = this.getCondition({
+        "id": req.query.id,
         "dados_pessoais_id": req.query.dados_pessoais_id
     });
     let dadosPessoaisCondition = getAssociationCondition(req, "dadosPessoais", dadosPessoaisCtl);
@@ -201,7 +208,7 @@ exports.delete = async (req, res) => {
             where: {
                 "id": id
             },
-            include: ["Recibos"],
+            include: ["Recibos", "DadosPessoais"],
             transaction: t
         })).toJSON();
 
@@ -226,6 +233,16 @@ exports.delete = async (req, res) => {
             }, {
                 transaction: t
             });
+            
+            destroyed = destroyed && await db.dadospessoais.destroy({
+                where: {
+                    "id": paciente.DadosPessoais.id
+                }
+            }, {
+                transaction: t
+            });  
+            
+            
             if (destroyed) {
                 await t.commit();
                 res.send({
