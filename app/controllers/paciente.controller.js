@@ -3,6 +3,10 @@ const Paciente = db.pacientes;
 const dadosPessoaisCtl = require("./dadospessoais.controller.js");
 const Op = db.Sequelize.Op;
 
+// var _ = require('lodash');
+
+const isEmpty = obj => !Object.getOwnPropertySymbols(obj).length && !Object.getOwnPropertyNames(obj).length;
+
 // Create and Save a new Paciente
 exports.create = async (req, res) => {
     // Validate request
@@ -34,9 +38,9 @@ exports.create = async (req, res) => {
 
 exports.count = (req, res) => {
     Paciente.count({
-            distinct: 'id',
-            where: {}
-        })
+        distinct: 'id',
+        where: {}
+    })
         .then(data => {
             res.send({
                 "count": data
@@ -49,25 +53,32 @@ exports.count = (req, res) => {
         });
 };
 
-exports.getCondition = function (context, attrPrefix="", attrSuffix="") {
-    if (context.id) {
-        return {
-            [`${attrPrefix}id${attrSuffix}`]: {
-                [Op.eq]: context.id
-            }
+exports.getCondition = function (context, attrPrefix = "", attrSuffix = "") {
+    if (context.id || context.dados_pessoais_id) {
+        let op = Op.and;
+        if (context.operator) {
+            op = context.operator.toLowerCase() === "and" ? Op.and : Op.or;
         }
-    }
-    else if (context.dados_pessoais_id) {
+
         return {
-            [`${attrPrefix}dados_pessoais_id${attrSuffix}`]: {
-                [Op.eq]: context.dados_pessoais_id
-            }
-        }
+            [op]: [
+                context.id ? {
+                    [`${attrPrefix}id${attrSuffix}`]: {
+                        [Op.eq]: context.id
+                    }
+                } : true,
+                context.dados_pessoais_id ? {
+                    [`${attrPrefix}dados_pessoais_id${attrSuffix}`]: {
+                        [Op.eq]: context.dados_pessoais_id
+                    }
+                } : true
+            ]
+        };
     }
     return null;
 }
 
-const getAssociationCondition = function (req, associationName, provider) {
+const getAssociationCondition = function (req, associationName, provider, forWhereClause = true) {
     let params = Object.keys(req.query).filter(k => k.toLowerCase().includes(associationName.toLowerCase()));
     if (params.length) {
         let context = new Object();
@@ -75,7 +86,7 @@ const getAssociationCondition = function (req, associationName, provider) {
         for (let param of params) {
             context[param.split('.')[(param.match(/\./g) || []).length]] = req.query[param];
         }
-        return provider.getCondition(context);
+        return forWhereClause ? provider.getCondition(context, '$DadosPessoais.', '$') : provider.getCondition(context);
     }
     return null;
 }
@@ -96,17 +107,11 @@ exports.findAll = async (req, res) => {
     });
     let dadosPessoaisCondition = getAssociationCondition(req, "dadosPessoais", dadosPessoaisCtl);
 
-    if (dadosPessoaisCondition) {
-        associations.push({
-            model: db.dadospessoais,
-            as: "DadosPessoais",
-            where: dadosPessoaisCondition
-        });
-    } else {
-        associations.push("DadosPessoais");
-    }
+    console.log(condition);
+    console.log(dadosPessoaisCondition);
+    condition = Object.assign({}, condition, dadosPessoaisCondition);
 
-    console.log(associations);
+    associations.push("DadosPessoais");
 
     let order;
 
@@ -126,16 +131,19 @@ exports.findAll = async (req, res) => {
         order = [sortBy, sortDesc === 'true' ? 'DESC' : 'ASC'];
     }
 
+    console.log(condition);
+    
+    
     Paciente.findAndCountAll({
-            where: condition,
-            include: associations,
-            order: [
-                order,
-            ],
-            offset: page ? ((page - 1) * size) : undefined,
-            limit: size || undefined,
-            subQuery: false
-        })
+        where: isEmpty(condition) ? true : { [Op.or]: condition },
+        include: associations,
+        order: [
+            order,
+        ],
+        offset: page ? ((page - 1) * size) : undefined,
+        limit: size || undefined,
+        subQuery: false
+    })
         .then(data => {
             res.send({
                 "pacientes": data.rows,
@@ -154,13 +162,13 @@ exports.findOne = async (req, res) => {
     const id = req.params.id;
 
     Paciente.findOne({
-            where: {
-                "id": {
-                    [Op.eq]: id
-                }
-            },
-            include: ["DadosPessoais", "Recibos", "Historicos"]
-        })
+        where: {
+            "id": {
+                [Op.eq]: id
+            }
+        },
+        include: ["DadosPessoais", "Recibos", "Historicos"]
+    })
         .then(data => {
             res.send(data);
         })
@@ -233,16 +241,16 @@ exports.delete = async (req, res) => {
             }, {
                 transaction: t
             });
-            
+
             destroyed = destroyed && await db.dadospessoais.destroy({
                 where: {
                     "id": paciente.DadosPessoais.id
                 }
             }, {
                 transaction: t
-            });  
-            
-            
+            });
+
+
             if (destroyed) {
                 await t.commit();
                 res.send({
@@ -264,9 +272,9 @@ exports.delete = async (req, res) => {
 // Delete all Pacientes from the database.
 exports.deleteAll = async (req, res) => {
     Paciente.destroy({
-            where: {},
-            truncate: false
-        })
+        where: {},
+        truncate: false
+    })
         .then(nums => {
             res.send({
                 message: `${nums} Pacientes were deleted successfully!`
